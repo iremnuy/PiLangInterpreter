@@ -1,0 +1,259 @@
+#lang racket
+
+(provide (all-defined-out))
+(define input-file "example1.pi")
+
+;(define (main)
+ ; (let ((program (parse input-file)))
+   ; (eval program)))
+
+
+; read and parse the input file
+(define parse (lambda (input-file)
+        (letrec (
+            [input-port (open-input-file input-file)]
+            [read-and-combine (lambda ()
+                (let ([line (read input-port)])
+                    (if (eof-object? line)
+                        '()
+                        (append `(,line) (read-and-combine))
+                    )
+                    (printf "line: ~a\n" line)
+                )
+            )]
+            )
+            (read-and-combine)
+        )
+    )
+)
+(define create-hash (lambda (vars values)
+        (letrec (
+            [create-hash-iter (lambda (vars values hash)
+                (if (null? vars)
+                    hash
+                    (create-hash-iter (cdr vars) (cdr values) (hash-set hash (car vars) (car values)))
+                )
+            )]
+            )
+            (create-hash-iter vars values (hash))
+        )
+    )
+)
+
+(define add-to-hash (lambda (old-hash new-hash)
+        (foldl (lambda (key hash) (hash-set hash key (hash-ref new-hash key)))
+            old-hash
+            (hash-keys new-hash)
+        )
+    )
+)
+
+(define eval-program (lambda (program-str)
+         ((printf "Hello, world!\n") (get (eval-exprs (parse program-str) empty-state) '-r))
+    )
+)
+
+; solution starts here
+; 1. empty-state (5 points)
+(define empty-state (make-immutable-hash))
+ ;no parameters
+; 2. get (5 points)
+(define (get state var) ;get is the func name state and var are parameters
+  (let ((val (hash-ref state var #f)))
+    (if (eq? val #f)
+        var
+        val)))
+
+; 3. put (5 points)
+;(define (put state var val) (hash-set state var val)) ;state var and val are parameters
+(define (put state key value)
+  (let ((new-hash (create-hash (list key) (list value))))
+    (add-to-hash state new-hash)))
+
+
+
+(define (operator? expr)
+  (and (symbol? expr)
+       (memq expr '(+ - * / < >))))
+
+(define (type-of x)
+  (cond
+    ((string? x) 'string)
+    ((number? x) 'number)
+    ((boolean? x) 'boolean)
+    ((pair? x) 'pair)
+    ((null? x) 'null)
+    ((symbol? x) 'symbol)
+    ((procedure? x) 'procedure)
+    (else 'unknown)))
+
+
+(define (eval-expr expr state)
+ (let ((type (type-of expr)))(printf "expr type is ~s and it ~s and state ~s" type expr state))
+  (cond
+    ((number? expr) (put state '-r expr)) ;if expr is a number create a new pair in state
+    ((boolean? expr)  (put state '-r expr))
+    ((string? expr) (put state '-r expr))
+    ((operator? expr)(let ((val (eval expr)))(put state '-r val)))
+
+
+    
+    ((symbol? expr)
+     (cond ((hash-has-key? state expr)
+            (let ((val (hash-ref state expr))) (printf "sem") 
+              (put state '-r val) 
+              ))
+           (else state (printf "else symbol"))))
+
+
+    
+    
+    ((null? expr) (put state '-r (list)) (printf "null"))
+    ((list? expr)
+     (let ((operator (car expr)) ;call the according function by checking operator
+           (operands (cdr expr)))
+       (cond
+         ((eq? operator 'quote) (cons state (car operands)))
+        ((eq? operator ':=) (let ((var (car operands))
+                          (val-expr (cadr operands)))
+                       (:= var val-expr state)))
+        ;;((eq? operator 'get) (let ((state (car operands))
+                 ;;         (var (cadr operands)))
+                     ;;  (get state var)))
+
+
+        
+         ((eq? operator 'while:) (let ((test-expr (car operands))
+                                    (body-exprs (cadr operands))
+                                   )
+                                (while: test-expr body-exprs state)))
+         ((eq? operator 'func)(let ((params (car operands))
+                                    (expr (cadr operands))
+                                   )
+                                (func params expr state)))
+         ((eq? operator 'if:) (let ((test-expr (car operands))
+                                    (then-exprs (cadr operands))
+                                    (else-exprs (caddr operands)))
+                                (if: test-expr then-exprs else-exprs state)))
+          ((eq? operator 'lambda)(let ((params (car operands))
+                                    (expr (cadr operands))
+                                   )
+                                (func params expr state)))
+
+          ;;((operator? operator)
+          ;;(let ((evaluated-operands (map-eval operands state))) (printf "bu mapevadan çıkan list ~a" evaluated-operands) ;if this list starts with an op (+ 1 2 ) seperate it
+            ;;(put state '-r (apply (eval operator)(take evaluated-operands (sub1 (length (map-eval operands state))))))))
+          ((number? operator)
+           (put state '-r expr)) ;; if it is sth like ( 5 10) then return the list in -r key to the map-eval
+ ;;(let ((num-list (map-eval expr state)))
+ ;;  (printf "map eval num list ~s" num-list)
+   ;;(put state '-r (take num-list (sub1 (length num-list))))))
+          
+  
+           ((symbol? operator)
+  (if (hash-has-key? state operator)
+      (let* ((new-state (eval-expr operator state))
+             (val (hash-ref new-state '-r)))
+        (put new-state '-r val))
+      (let ((operator-func (eval operator)))
+        (if (procedure? operator-func)
+             (let ((result (apply operator-func (take (map-eval operands state) (sub1 (length (map-eval operands state)))))))
+             
+              (printf "Result value: ~a\n" result) (put state '-r result))
+            (error 'eval-expr "The evaluated operator is not a procedure.")))))
+          
+        
+
+
+           ((list? operator) (eval-expr operator state) (printf "list"))
+
+
+         )))))
+
+
+
+; 4. := (15 points)
+
+(define (:= var val-expr state)
+  (let* ((new-state (eval-expr val-expr state))
+         (val (hash-ref new-state '-r))
+         (updated-state (put new-state var val)))
+    (printf "val is ~s and new state is ~s\n" val updated-state)
+    updated-state))
+
+
+
+
+
+
+
+; 5. if: (15 points)
+(define (if: test-expr then-exprs else-exprs state)
+  (let ((result-state (eval-expr test-expr state)))
+     (printf "Result state after test-expr: ~s\n" result-state)
+    (if (hash-ref result-state '-r)
+        (eval-exprs then-exprs result-state)
+        (eval-exprs else-exprs result-state))))
+
+; 6. while: (15 points)
+(define (while: test-expr body-exprs state)
+  (let ((result-state (eval-expr test-expr state)))
+    (if (hash-ref result-state '-r)
+        (begin
+          (set! state (eval-exprs body-exprs state))
+          (printf "after test state : ~s\n" state)
+          (while: test-expr body-exprs state))
+        (printf "else\n")))) 
+
+
+
+ (define (map-eval expr state)
+  (cond
+    ((null? expr) '())
+    ((pair? expr)
+     (let ((result-state (eval-expr (car expr) state)))
+       (cons (hash-ref result-state '-r) (map-eval (cdr expr) result-state))))
+    (else (list expr))))
+
+
+(define (butlast lst)
+  (if (null? (cdr lst))
+      '()
+      (cons (car lst) (butlast (cdr lst)))))
+
+
+; 7. func (15 points)
+(define (func params body-exprs state)
+  (define (func-body . args)
+    (if (= (length params) (length args))
+        (let* ((new-state-with-args (bind-args state params args))
+               (result-state (eval-exprs body-exprs new-state-with-args))
+               (result (get result-state '-r)))
+          result)
+        (error 'func-body "arg num ~s and para num ~s and args is ~s" (length args) (length params) args)))
+
+  (define (bind-args state params args)
+    (let ((arg-list (list args)))
+      (apply (lambda (arg-list) (apply func-body arg-list)))))
+
+  (put state '-r (lambda (args) (bind-args state params args))))
+ ; Update the '-r key in the main state
+
+
+  
+; 8. eval-expr (20 points)
+
+
+; 9 eval-exprs (5 points)
+(define (eval-exprs exprs state)
+  (foldl (lambda (expr st)
+           (begin
+             (set! state (eval-expr expr st))
+             (printf "after eval state is ~s\n" state)
+             state))
+         state
+         exprs))
+
+
+
+
